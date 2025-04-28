@@ -167,78 +167,49 @@ def preprocess(input_file: str, target_col: str,
                max_removal: float = 0.2,
                corr_thresh: float = 0.95,
                max_onehot: int = 10) -> str:
+    # 1. CSV 파일을 읽어와 DataFrame으로 저장
     df = pd.read_csv(input_file)
+
+    # 2. 타겟 컬럼에 결측치가 있는 행을 제거하고 인덱스를 재설정
     df = df.dropna(subset=[target_col]).reset_index(drop=True)
+
+    # 3. 타겟 변수(y)와 피처(X) 분리
     y = df[target_col]
     X = df.drop(columns=[target_col])
+
+    # 4. 컬럼명 및 문자열 값을 소문자 및 언더스코어 형식으로 정규화
     X = standardize_columns(X)
+
+    # 5. 'Unnamed' 또는 'id' 컬럼 및 결측치 비율이 높은 컬럼 제거
     X = drop_id_unnamed_and_missing(X, missing_thresh)
+
+    # 6. 결측치 대치 (수치형: 중간값, 범주형: 최빈값)
     X = impute_missing(X)
+
+    # 7. 이상치 제거 (IQR 기준, 전체 데이터의 max_removal 비율 이하만 제거)
     X = remove_outliers(X, max_removal)
+
+    # 8. 높은 상관관계를 가진 수치형 컬럼 제거 (상관계수 절댓값이 corr_thresh 이상)
     X = drop_highly_correlated(X, corr_thresh)
+
+    # 9. 범주형 변수 인코딩 및 수치형 변수 정규화
     X = encode_and_normalize(X, max_onehot)
+
+    # 10. 전처리 과정에서 제거된 행을 반영하여 y의 인덱스를 X와 일치시킴
     y = y.loc[X.index].reset_index(drop=True)
+
+    # 11. 원본 파일명에서 확장자를 제거하고 새로운 파일명 생성
     base = os.path.splitext(os.path.basename(input_file))[0]
     out_file = f"processed_{base}.csv"
+
+    # 12. 전처리된 X와 y를 합쳐 새로운 CSV 파일로 저장
     pd.concat([X.reset_index(drop=True), y], axis=1).to_csv(out_file, index=False)
+
+    # 13. 저장된 파일 경로를 출력
     print(f"[INFO] Processed data saved to: {out_file}")
+
+    # 14. 전처리된 파일 경로 반환
     return out_file
-```
-- CSV 파일을 로드하고, 전처리 과정을 거쳐, 전처리된 CSV 파일로 저장하는 함수
-- 🧠 각 단계 설명
-CSV 파일 읽기:
-
-pd.read_csv(input_file)를 사용하여 데이터를 불러옵니다.
-
-타겟 컬럼 결측치 제거 및 인덱스 재설정:
-
-타겟 컬럼에 결측치가 있는 행을 제거하고, 인덱스를 재설정합니다.
-
-타겟 변수(y)와 피처(X) 분리:
-
-타겟 컬럼을 y로, 나머지 피처를 X로 분리합니다.
-
-컬럼명 및 문자열 정규화:
-
-컬럼명을 소문자로 변환하고, 공백을 언더스코어로 대체하며, 특수문자를 제거합니다.
-
-문자열 값을 소문자로 변환하고, 공백을 언더스코어로 대체합니다.
-
-ID/Unnamed 컬럼 및 결측치 비율이 높은 컬럼 제거:
-
-'Unnamed'로 시작하거나 'id'로 끝나는 컬럼을 제거합니다.
-
-결측치 비율이 missing_thresh보다 높은 컬럼을 제거합니다.
-
-결측치 대치:
-
-수치형 컬럼의 결측치는 중간값으로, 범주형 컬럼의 결측치는 최빈값으로 대치합니다.
-
-이상치 제거:
-
-IQR(Interquartile Range) 방법을 사용하여 이상치를 제거합니다.
-
-전체 데이터의 max_removal 비율 이하만 제거합니다.
-
-높은 상관관계 컬럼 제거:
-
-수치형 컬럼 간 상관계수의 절댓값이 corr_thresh 이상인 컬럼을 제거합니다.
-
-범주형 인코딩 및 수치형 정규화:
-
-범주형 변수는 고유값 개수에 따라 Label Encoding 또는 One-Hot Encoding을 적용합니다.
-
-수치형 변수는 StandardScaler를 사용하여 정규화합니다.
-
-타겟 변수 y의 인덱스를 X와 맞추기:
-
-전처리 과정에서 제거된 행을 반영하여 y의 인덱스를 X와 일치시킵니다.
-
-전처리된 데이터 저장:
-
-전처리된 X와 y를 합쳐 새로운 CSV 파일로 저장합니다.
-
-파일명은 processed_원본파일명.csv 형식입니다.
 
 
 
