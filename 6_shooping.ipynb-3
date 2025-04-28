@@ -1,0 +1,291 @@
+{
+  "nbformat": 4,
+  "nbformat_minor": 0,
+  "metadata": {
+    "colab": {
+      "provenance": [],
+      "include_colab_link": true
+    },
+    "kernelspec": {
+      "name": "python3",
+      "display_name": "Python 3"
+    },
+    "language_info": {
+      "name": "python"
+    }
+  },
+  "cells": [
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "view-in-github",
+        "colab_type": "text"
+      },
+      "source": [
+        "<a href=\"https://colab.research.google.com/github/kimjoengmin/TEAM2-PYTHON/blob/main/6_shooping.ipynb-3\" target=\"_parent\"><img src=\"https://colab.research.google.com/assets/colab-badge.svg\" alt=\"Open In Colab\"/></a>"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 11,
+      "metadata": {
+        "id": "tFAJAR_3m020"
+      },
+      "outputs": [],
+      "source": [
+        "# ===== Cell 1: Imports =====\n",
+        "import os\n",
+        "import numpy as np\n",
+        "import pandas as pd\n",
+        "from sklearn.preprocessing import LabelEncoder, OneHotEncoder, StandardScaler\n",
+        "from sklearn.impute import SimpleImputer\n",
+        "from sklearn.model_selection import StratifiedKFold, KFold\n",
+        "from sklearn.ensemble import RandomForestClassifier\n",
+        "from xgboost import XGBClassifier\n",
+        "from imblearn.over_sampling import SMOTE"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# ===== Cell 2: Helper Functions =====\n",
+        "\n",
+        "def standardize_columns(df: pd.DataFrame) -> pd.DataFrame:\n",
+        "    \"\"\"컬럼명 및 문자열 값을 소문자_언더스코어 형식으로 정규화\"\"\"\n",
+        "    df = df.copy()\n",
+        "    df.columns = (\n",
+        "        df.columns\n",
+        "          .str.strip()\n",
+        "          .str.lower()\n",
+        "          .str.replace(' ', '_', regex=False)\n",
+        "          .str.replace(r'[^0-9a-zA-Z_]', '', regex=True)\n",
+        "    )\n",
+        "    for col in df.select_dtypes(include=['object', 'category']):\n",
+        "        df[col] = (\n",
+        "            df[col].astype(str)\n",
+        "                   .str.strip()\n",
+        "                   .str.replace(' ', '_', regex=False)\n",
+        "        )\n",
+        "    return df"
+      ],
+      "metadata": {
+        "id": "-_afGHTrm2bV"
+      },
+      "execution_count": 12,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# ===== Cell 3: Helper Functions =====\n",
+        "def drop_id_unnamed_and_missing(df: pd.DataFrame, missing_thresh: float = 0.5) -> pd.DataFrame:\n",
+        "    \"\"\"ID/Unnamed 컬럼 및 결측치 비율이 높은 컬럼 제거\"\"\"\n",
+        "    df = df.copy()\n",
+        "    to_drop = df.columns[df.columns.str.contains(r'^(?:unnamed)|id$', case=False, regex=True)]\n",
+        "    df = df.drop(columns=to_drop)\n",
+        "    missing = df.isnull().mean()\n",
+        "    df = df.drop(columns=missing[missing > missing_thresh].index)\n",
+        "    return df"
+      ],
+      "metadata": {
+        "id": "sF9yNBkEm5XL"
+      },
+      "execution_count": 13,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# ===== Cell 4: Helper Functions =====\n",
+        "def impute_missing(df: pd.DataFrame) -> pd.DataFrame:\n",
+        "    \"\"\"수치형 중간값, 범주형 최빈값으로 결측치 대치\"\"\"\n",
+        "    df = df.copy()\n",
+        "    num_cols = df.select_dtypes(include=np.number).columns.tolist()\n",
+        "    cat_cols = df.select_dtypes(include=['object', 'category', 'bool']).columns.tolist()\n",
+        "    if num_cols:\n",
+        "        df[num_cols] = pd.DataFrame(\n",
+        "            SimpleImputer(strategy='median').fit_transform(df[num_cols]),\n",
+        "            columns=num_cols\n",
+        "        )\n",
+        "    if cat_cols:\n",
+        "        df[cat_cols] = pd.DataFrame(\n",
+        "            SimpleImputer(strategy='most_frequent').fit_transform(df[cat_cols]),\n",
+        "            columns=cat_cols\n",
+        "        )\n",
+        "    return df"
+      ],
+      "metadata": {
+        "id": "GRAo0dtkm5v-"
+      },
+      "execution_count": 14,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# ===== Cell 5: Helper Functions =====\n",
+        "def remove_outliers(df: pd.DataFrame, max_removal: float = 0.2) -> pd.DataFrame:\n",
+        "    \"\"\"IQR 기준 이상치 제거 (전체의 max_removal 이하만 제거)\"\"\"\n",
+        "    df = df.copy()\n",
+        "    total = len(df)\n",
+        "    for col in df.select_dtypes(include=np.number):\n",
+        "        Q1, Q3 = df[col].quantile([0.25, 0.75])\n",
+        "        IQR = Q3 - Q1\n",
+        "        mask = df[col].between(Q1 - 1.5 * IQR, Q3 + 1.5 * IQR)\n",
+        "        if mask.sum() > (1 - max_removal) * total:\n",
+        "            df = df[mask]\n",
+        "    return df"
+      ],
+      "metadata": {
+        "id": "e3zUOeiGm6BF"
+      },
+      "execution_count": 15,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# ===== Cell 6: Helper Functions =====\n",
+        "def drop_highly_correlated(df: pd.DataFrame, threshold: float = 0.95) -> pd.DataFrame:\n",
+        "    \"\"\"상관계수 절댓값이 threshold 이상인 컬럼 제거\"\"\"\n",
+        "    df = df.copy()\n",
+        "    corr = df.select_dtypes(include=np.number).corr().abs()\n",
+        "    upper = corr.where(np.triu(np.ones(corr.shape), k=1).astype(bool))\n",
+        "    to_drop = [c for c in upper.columns if any(upper[c] > threshold)]\n",
+        "    return df.drop(columns=to_drop)"
+      ],
+      "metadata": {
+        "id": "xMYuutp5m6Nw"
+      },
+      "execution_count": 16,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# ===== Cell 7: 인코딩 및 스케일링 =====\n",
+        "def encode_and_normalize(X: pd.DataFrame, max_onehot: int = 10) -> pd.DataFrame:\n",
+        "    \"\"\"범주형은 Label/OneHot, 수치형은 StandardScaler 적용\"\"\"\n",
+        "    X = X.copy()\n",
+        "    for col in X.select_dtypes(include=['object', 'category', 'bool']):\n",
+        "        nun = X[col].nunique()\n",
+        "        if nun <= 2:\n",
+        "            X[col] = LabelEncoder().fit_transform(X[col])\n",
+        "        elif nun <= max_onehot:\n",
+        "            ohe = OneHotEncoder(sparse=False, handle_unknown='ignore')\n",
+        "            arr = ohe.fit_transform(X[[col]])\n",
+        "            cols = [f\"{col}_{cat}\" for cat in ohe.categories_[0]]\n",
+        "            X[cols] = arr\n",
+        "            X = X.drop(columns=[col])\n",
+        "        else:\n",
+        "            X = X.drop(columns=[col])\n",
+        "    num_cols = X.select_dtypes(include=np.number).columns\n",
+        "    X[num_cols] = StandardScaler().fit_transform(X[num_cols])\n",
+        "    return X"
+      ],
+      "metadata": {
+        "id": "V910LHg5m9eA"
+      },
+      "execution_count": 17,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# ===== Cell 8: 함수 프로세싱 =====\n",
+        "def preprocess(input_file: str, target_col: str = None,\n",
+        "               missing_thresh: float = 0.5,\n",
+        "               max_removal: float = 0.2,\n",
+        "               corr_thresh: float = 0.95,\n",
+        "               max_onehot: int = 10) -> str:\n",
+        "    \"\"\"CSV 로드 → 고객 집계 → target 분리 → feature 전처리 → processed CSV 저장\"\"\"\n",
+        "\n",
+        "    df = pd.read_csv(input_file)\n",
+        "\n",
+        "    # 🔥 주문 단위 데이터를 고객 단위로 집계\n",
+        "    df = aggregate_customer_level(df)\n",
+        "\n",
+        "    # 🔥 target_col이 있을 때만 y 분리 (Segmentation 없으면 건너뜀)\n",
+        "    if target_col:\n",
+        "        df = df.dropna(subset=[target_col]).reset_index(drop=True)\n",
+        "        y = df[target_col]\n",
+        "        X = df.drop(columns=[target_col])\n",
+        "    else:\n",
+        "        X = df.copy()\n",
+        "        y = None\n",
+        "\n",
+        "    X = standardize_columns(X)\n",
+        "    X = drop_id_unnamed_and_missing(X, missing_thresh)\n",
+        "    X = impute_missing(X)\n",
+        "    X = remove_outliers(X, max_removal)\n",
+        "    X = drop_highly_correlated(X, corr_thresh)\n",
+        "    X = encode_and_normalize(X, max_onehot)\n",
+        "\n",
+        "    # 🔥 y가 존재할 때만 X와 y를 합쳐 저장\n",
+        "    if y is not None:\n",
+        "        y = y.loc[X.index].reset_index(drop=True)\n",
+        "        result = pd.concat([X.reset_index(drop=True), y], axis=1)\n",
+        "    else:\n",
+        "        result = X.reset_index(drop=True)\n",
+        "\n",
+        "    base = os.path.splitext(os.path.basename(input_file))[0]\n",
+        "    out_file = f\"processed_{base}.csv\"\n",
+        "    result.to_csv(out_file, index=False)\n",
+        "\n",
+        "    print(f\"[INFO] Processed data saved to: {out_file}\")\n",
+        "    return out_file"
+      ],
+      "metadata": {
+        "id": "SZ-GrxGLnKUs"
+      },
+      "execution_count": 18,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# ===== Cell 9: 메인 실행 코드 =====\n",
+        "input_file = '6._shopping.csv'\n",
+        "\n",
+        "processed_path = preprocess(input_file, '')\n"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/",
+          "height": 356
+        },
+        "id": "hKHrRwQJnROE",
+        "outputId": "69db5417-3a21-4c55-8fb3-98a6c9da65a1"
+      },
+      "execution_count": 20,
+      "outputs": [
+        {
+          "output_type": "error",
+          "ename": "FileNotFoundError",
+          "evalue": "[Errno 2] No such file or directory: '6._shopping.csv'",
+          "traceback": [
+            "\u001b[0;31m---------------------------------------------------------------------------\u001b[0m",
+            "\u001b[0;31mFileNotFoundError\u001b[0m                         Traceback (most recent call last)",
+            "\u001b[0;32m<ipython-input-20-8e4fea69b8a4>\u001b[0m in \u001b[0;36m<cell line: 0>\u001b[0;34m()\u001b[0m\n\u001b[1;32m      2\u001b[0m \u001b[0minput_file\u001b[0m \u001b[0;34m=\u001b[0m \u001b[0;34m'6._shopping.csv'\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[1;32m      3\u001b[0m \u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0;32m----> 4\u001b[0;31m \u001b[0mprocessed_path\u001b[0m \u001b[0;34m=\u001b[0m \u001b[0mpreprocess\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0minput_file\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0;34m''\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0m",
+            "\u001b[0;32m<ipython-input-18-c5c4ee3289cc>\u001b[0m in \u001b[0;36mpreprocess\u001b[0;34m(input_file, target_col, missing_thresh, max_removal, corr_thresh, max_onehot)\u001b[0m\n\u001b[1;32m      7\u001b[0m     \u001b[0;34m\"\"\"CSV 로드 → 고객 집계 → target 분리 → feature 전처리 → processed CSV 저장\"\"\"\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[1;32m      8\u001b[0m \u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0;32m----> 9\u001b[0;31m     \u001b[0mdf\u001b[0m \u001b[0;34m=\u001b[0m \u001b[0mpd\u001b[0m\u001b[0;34m.\u001b[0m\u001b[0mread_csv\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0minput_file\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0m\u001b[1;32m     10\u001b[0m \u001b[0;34m\u001b[0m\u001b[0m\n\u001b[1;32m     11\u001b[0m     \u001b[0;31m# 🔥 주문 단위 데이터를 고객 단위로 집계\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n",
+            "\u001b[0;32m/usr/local/lib/python3.11/dist-packages/pandas/io/parsers/readers.py\u001b[0m in \u001b[0;36mread_csv\u001b[0;34m(filepath_or_buffer, sep, delimiter, header, names, index_col, usecols, dtype, engine, converters, true_values, false_values, skipinitialspace, skiprows, skipfooter, nrows, na_values, keep_default_na, na_filter, verbose, skip_blank_lines, parse_dates, infer_datetime_format, keep_date_col, date_parser, date_format, dayfirst, cache_dates, iterator, chunksize, compression, thousands, decimal, lineterminator, quotechar, quoting, doublequote, escapechar, comment, encoding, encoding_errors, dialect, on_bad_lines, delim_whitespace, low_memory, memory_map, float_precision, storage_options, dtype_backend)\u001b[0m\n\u001b[1;32m   1024\u001b[0m     \u001b[0mkwds\u001b[0m\u001b[0;34m.\u001b[0m\u001b[0mupdate\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0mkwds_defaults\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[1;32m   1025\u001b[0m \u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0;32m-> 1026\u001b[0;31m     \u001b[0;32mreturn\u001b[0m \u001b[0m_read\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0mfilepath_or_buffer\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mkwds\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0m\u001b[1;32m   1027\u001b[0m \u001b[0;34m\u001b[0m\u001b[0m\n\u001b[1;32m   1028\u001b[0m \u001b[0;34m\u001b[0m\u001b[0m\n",
+            "\u001b[0;32m/usr/local/lib/python3.11/dist-packages/pandas/io/parsers/readers.py\u001b[0m in \u001b[0;36m_read\u001b[0;34m(filepath_or_buffer, kwds)\u001b[0m\n\u001b[1;32m    618\u001b[0m \u001b[0;34m\u001b[0m\u001b[0m\n\u001b[1;32m    619\u001b[0m     \u001b[0;31m# Create the parser.\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0;32m--> 620\u001b[0;31m     \u001b[0mparser\u001b[0m \u001b[0;34m=\u001b[0m \u001b[0mTextFileReader\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0mfilepath_or_buffer\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0;34m**\u001b[0m\u001b[0mkwds\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0m\u001b[1;32m    621\u001b[0m \u001b[0;34m\u001b[0m\u001b[0m\n\u001b[1;32m    622\u001b[0m     \u001b[0;32mif\u001b[0m \u001b[0mchunksize\u001b[0m \u001b[0;32mor\u001b[0m \u001b[0miterator\u001b[0m\u001b[0;34m:\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n",
+            "\u001b[0;32m/usr/local/lib/python3.11/dist-packages/pandas/io/parsers/readers.py\u001b[0m in \u001b[0;36m__init__\u001b[0;34m(self, f, engine, **kwds)\u001b[0m\n\u001b[1;32m   1618\u001b[0m \u001b[0;34m\u001b[0m\u001b[0m\n\u001b[1;32m   1619\u001b[0m         \u001b[0mself\u001b[0m\u001b[0;34m.\u001b[0m\u001b[0mhandles\u001b[0m\u001b[0;34m:\u001b[0m \u001b[0mIOHandles\u001b[0m \u001b[0;34m|\u001b[0m \u001b[0;32mNone\u001b[0m \u001b[0;34m=\u001b[0m \u001b[0;32mNone\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0;32m-> 1620\u001b[0;31m         \u001b[0mself\u001b[0m\u001b[0;34m.\u001b[0m\u001b[0m_engine\u001b[0m \u001b[0;34m=\u001b[0m \u001b[0mself\u001b[0m\u001b[0;34m.\u001b[0m\u001b[0m_make_engine\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0mf\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mself\u001b[0m\u001b[0;34m.\u001b[0m\u001b[0mengine\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0m\u001b[1;32m   1621\u001b[0m \u001b[0;34m\u001b[0m\u001b[0m\n\u001b[1;32m   1622\u001b[0m     \u001b[0;32mdef\u001b[0m \u001b[0mclose\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0mself\u001b[0m\u001b[0;34m)\u001b[0m \u001b[0;34m->\u001b[0m \u001b[0;32mNone\u001b[0m\u001b[0;34m:\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n",
+            "\u001b[0;32m/usr/local/lib/python3.11/dist-packages/pandas/io/parsers/readers.py\u001b[0m in \u001b[0;36m_make_engine\u001b[0;34m(self, f, engine)\u001b[0m\n\u001b[1;32m   1878\u001b[0m                 \u001b[0;32mif\u001b[0m \u001b[0;34m\"b\"\u001b[0m \u001b[0;32mnot\u001b[0m \u001b[0;32min\u001b[0m \u001b[0mmode\u001b[0m\u001b[0;34m:\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[1;32m   1879\u001b[0m                     \u001b[0mmode\u001b[0m \u001b[0;34m+=\u001b[0m \u001b[0;34m\"b\"\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0;32m-> 1880\u001b[0;31m             self.handles = get_handle(\n\u001b[0m\u001b[1;32m   1881\u001b[0m                 \u001b[0mf\u001b[0m\u001b[0;34m,\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[1;32m   1882\u001b[0m                 \u001b[0mmode\u001b[0m\u001b[0;34m,\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n",
+            "\u001b[0;32m/usr/local/lib/python3.11/dist-packages/pandas/io/common.py\u001b[0m in \u001b[0;36mget_handle\u001b[0;34m(path_or_buf, mode, encoding, compression, memory_map, is_text, errors, storage_options)\u001b[0m\n\u001b[1;32m    871\u001b[0m         \u001b[0;32mif\u001b[0m \u001b[0mioargs\u001b[0m\u001b[0;34m.\u001b[0m\u001b[0mencoding\u001b[0m \u001b[0;32mand\u001b[0m \u001b[0;34m\"b\"\u001b[0m \u001b[0;32mnot\u001b[0m \u001b[0;32min\u001b[0m \u001b[0mioargs\u001b[0m\u001b[0;34m.\u001b[0m\u001b[0mmode\u001b[0m\u001b[0;34m:\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[1;32m    872\u001b[0m             \u001b[0;31m# Encoding\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0;32m--> 873\u001b[0;31m             handle = open(\n\u001b[0m\u001b[1;32m    874\u001b[0m                 \u001b[0mhandle\u001b[0m\u001b[0;34m,\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[1;32m    875\u001b[0m                 \u001b[0mioargs\u001b[0m\u001b[0;34m.\u001b[0m\u001b[0mmode\u001b[0m\u001b[0;34m,\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n",
+            "\u001b[0;31mFileNotFoundError\u001b[0m: [Errno 2] No such file or directory: '6._shopping.csv'"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [],
+      "metadata": {
+        "id": "DpI_0E21qYHF"
+      },
+      "execution_count": null,
+      "outputs": []
+    }
+  ]
+}
